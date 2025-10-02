@@ -15,6 +15,7 @@ def webhook():
     user_message = data.get("message") or data.get("text") or ""
 
     try:
+        # Si usas el SDK antiguo:
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
@@ -30,3 +31,7 @@ def webhook():
         reply = "Lo siento, ha ocurrido un error al procesar tu consulta."
 
     return jsonify({"reply": reply})
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
