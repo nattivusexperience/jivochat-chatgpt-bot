@@ -139,5 +139,53 @@ def debug_search():
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    data = request.json
+    data = request.json or {}
+    user_message = (
+        data.get("message")
+        or data.get("text")
+        or (data.get("payload") or {}).get("text")
+        or (data.get("data") or {}).get("text")
+        or ""
+    ).strip()
 
+    if not user_message:
+        return jsonify({"reply": "¿Podrías reformular tu pregunta?"})
+
+    if not KB_INDEX:
+        return jsonify({"reply": "Base de conocimiento vacía. Añade .md en /kb y vuelve a desplegar o llama /reindex."})
+
+    # Recuperar contexto con fallback
+    hits = retrieve_context(user_message, top_k=8, min_sim=0.50)
+    context = format_context(hits) if hits else ""
+
+    # Prompt estricto: SOLO KB; si no hay datos, mensaje fijo
+    system_rules = (
+        "Eres un asistente para El Tren Transcantábrico. "
+        "Responde EXCLUSIVAMENTE con la información proporcionada en 'Base de conocimiento'. "
+        "No inventes ni generalices. Si la base no cubre la pregunta, responde EXACTAMENTE: "
+        "'No dispongo de esa información en la base de conocimiento. Por favor, escribe a info@eltrentranscantabrico.com.' "
+        "Si hay contexto, extrae y lista los elementos relevantes respetando medidas, nombres y detalles."
+    )
+
+    messages = [{"role": "system", "content": system_rules}]
+    if context:
+        messages.append({"role": "system", "content": f"Base de conocimiento:\n{context}"})
+    messages.append({"role": "user", "content": user_message})
+
+    try:
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
+            temperature=0.0,     # modo extractivo
+            max_tokens=900
+        )
+        reply = resp.choices[0].message.content.strip()
+    except Exception as e:
+        print("Error OpenAI:", repr(e))
+        reply = "Lo siento, ha ocurrido un error al procesar tu consulta."
+
+    return jsonify({"reply": reply})
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
