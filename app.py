@@ -86,14 +86,15 @@ def webhook():
     if not KB_INDEX:
         return jsonify({"reply":"Base de conocimiento vacía. Añade .md en /kb y vuelve a desplegar o llama /reindex."})
 
-    hits = retrieve_context(user_message, top_k=3, min_sim=0.70)
+    hits = retrieve_context(user_message, top_k=5, min_sim=0.60)  # más permisivo y trae más trozos
     context = format_context(hits) if hits else ""
 
     system_rules = (
         "Eres un asistente para El Tren Transcantábrico. "
-        "Responde SOLO con la información de la 'Base de conocimiento' adjunta. "
-        "Si la base no cubre la pregunta, dilo con claridad y sugiere escribir a info@eltrentranscantabrico.com. "
-        "No inventes datos."
+        "Responde EXCLUSIVAMENTE con la información proporcionada en 'Base de conocimiento'. "
+        "No inventes ni generalices. Si la base no cubre la pregunta, responde EXACTAMENTE: "
+        "'No dispongo de esa información en la base de conocimiento. Por favor, escribe a info@eltrentranscantabrico.com.' "
+        "Si hay contexto, extrae y lista los elementos relevantes sin reescribirlos en generalidades; conserva medidas, detalles y matices."
     )
 
     messages = [{"role":"system","content": system_rules}]
@@ -105,8 +106,8 @@ def webhook():
         resp = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=messages,
-            temperature=0.2,
-            max_tokens=500
+            temperature=0.0,      # cero creatividad: SOLO extraer/condensar
+            max_tokens=900
         )
         reply = resp.choices[0].message.content.strip()
     except Exception as e:
