@@ -1,0 +1,20 @@
+## Servicios a bordo y políticas
+- Desayunos, almuerzos y cenas: combinación a bordo/restaurantes; gastronomía local y de alta calidad.
+- Dietas especiales: posible adaptar menús (alergias/vegetarianos) avisando por escrito al reservar.
+- Vestimenta: sin código obligatorio general. Para Casino de Santander se requiere ropa elegante (no shorts ni zapatillas). Para visitas: calzado/ropa cómoda; según temporada, impermeable/abrigo.
+- Viajar el mismo día: no recomendado volar o tomar transportes el mismo día de inicio/fin; preferible llegar el día anterior y salir al día siguiente.
+- Fumar: prohibido a bordo (por ley). Tramos entre paradas 3–4 horas aprox.
+- Mascotas: no permitidas, salvo perros guía.
+- Accesibilidad: tren histórico no adaptado para movilidad en silla de ruedas/andador en el interior. Viable con acompañante que ayude (no hay personal dedicado).
+- Circulación nocturna: el tren no circula de noche; pernocta estacionado.
+- Capacidad: 28 pasajeros (hasta 32 con ocupación triple en algunas cabinas). Salones abiertos 24 h.
+- Propinas: no obligatorias.
+- Asistencia médica: botiquín y tripulación formada; derivación a centros de salud si se precisa. Recomendable seguro médico para no-UE. 
+- Lavandería: servicio externo (no incluido), recogida/entrega en cabina; plazo habitual 24–48 h; cobro al final.
+- Paraguas: disponibles para uso de pasajeros.
+- Moneda: Euro.
+- Bebés: posible viajar con cuna aportada por el cliente (espacio disponible en suite).
+- Internet: wifi a bordo y ordenador en salones.
+- Documentación: extranjeros, la requerida para entrar en España; españoles, DNI o pasaporte.
+- Electricidad: 230 V, 50 Hz; enchufe tipo F.
+- Seguridad: caja fuerte en cabina; estaciones con servicio de seguridad.
