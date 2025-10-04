@@ -1,0 +1,12 @@
+## Términos de uso (resumen)
+- Objeto: reglas de acceso y uso de eltrentranscantabrico.com y sus servicios.
+- Presentación: titular del sitio Nattivus Experience S.L., agencia autorizada (CICMA 3462), contacto info@eltrentranscantabrico.com.
+- Aceptación: usar el sitio implica aceptar Términos de Uso, Política de Privacidad y Condiciones de Reserva.
+- Uso del sitio: uso personal o para reservas; no solicitudes falsas; mayor de 18 años y con capacidad legal; veracidad de datos introducidos.
+- Exención/limitación de responsabilidad: contenidos informativos; no se garantiza ausencia de errores; posibilidad de suspensión por mantenimiento/causas de fuerza mayor; no responsabilidad por fallos de terceros/enlaces.
+- Prohibiciones: contenidos ilícitos/ofensivos; uso comercial sin permiso; spam; virus; interferir en el correcto funcionamiento; vulneración de seguridad, etc.
+- Propiedad intelectual: contenidos del sitio bajo titularidad/licencia; prohibida reproducción/distribución sin autorización.
+- Protección de datos: ver Política de Privacidad.
+- Modificaciones: el sitio puede revisar condiciones sin previo aviso; se recomienda consulta periódica.
+- Ley aplicable y jurisdicción: derecho español; juzgados y tribunales de Madrid.
+- Contacto: info@eltrentranscantabrico.com
