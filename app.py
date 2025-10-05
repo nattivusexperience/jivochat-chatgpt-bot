@@ -96,6 +96,8 @@ def index_path_for(brand: str) -> str:
 
 def load_kb_files(kb_folder: str):
     docs = []
+
+    # 1) .md (como ya tenías)
     for path in sorted(glob.glob(os.path.join(kb_folder, "*.md"))):
         with open(path, "r", encoding="utf-8") as f:
             text = f.read().strip()
@@ -104,6 +106,25 @@ def load_kb_files(kb_folder: str):
             chunk = text[i:i+CHARS_PER_CHUNK].strip()
             if chunk:
                 docs.append({"title": title, "text": chunk})
+
+    # 2) .jsonl (NUEVO)
+    for path in sorted(glob.glob(os.path.join(kb_folder, "*.jsonl"))):
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except Exception:
+                    continue
+                content = (rec.get("content") or "").strip()
+                title = f"{os.path.basename(path)}::{rec.get('id') or rec.get('title') or 'chunk'}"
+                if content:
+                    # Normalización suave: emails con espacios tipo "info@ eltrenalandalus.com"
+                    content = content.replace(" @", "@").replace("@ ", "@")
+                    docs.append({"title": title, "text": content})
+
     return docs
 
 def build_index_for(brand: str):
@@ -225,23 +246,33 @@ def translate(text: str, target_lang: str) -> str:
 # =========================
 # RAG principal
 # =========================
+FALLBACK_EMAIL_BY_BRAND = {
+    "alandalus": "info@eltrenalandalus.com",
+    "transcantabrico": "info@eltrentranscantabrico.com",
+    "costaverde": "info@trencostaverdeexpress.com",
+    "robla": "info@trenexpresodelarobla.com",
+    None: "info@eltrenalandalus.com",   # default razonable
+}
+
 def rag_reply(user_text: str, brand: str = None, user_lang: str = None) -> str:
     user_lang = user_lang or detect_lang(user_text)
-
-    # Para recuperar: si no hay KB en ese idioma, traducimos la consulta a ES
     query_for_kb = user_text if user_lang == "es" else translate(user_text, "es")
 
     hits = retrieve_context(query_for_kb, brand=brand, top_k=8, min_sim=0.50)
     context = format_context(hits) if hits else ""
+
+    fallback_email = FALLBACK_EMAIL_BY_BRAND.get(brand, FALLBACK_EMAIL_BY_BRAND[None])
 
     system_rules = (
         f"Eres un asistente para trenes de lujo en España. "
         f"Responde EXCLUSIVAMENTE con la información de 'Base de conocimiento'. "
         f"No inventes ni generalices. Responde en idioma: {user_lang}. "
         f"Si la base no cubre la pregunta, responde EXACTAMENTE: "
-        f"'No dispongo de esa información en la base de conocimiento. Por favor, escribe a info@eltrentranscantabrico.com.' "
+        f"'No dispongo de esa información en la base de conocimiento. Por favor, escribe a {fallback_email}.' "
         f"Si hay contexto, extrae y lista los elementos relevantes respetando medidas, nombres y detalles."
     )
+    ...
+
 
     messages = [{"role": "system", "content": system_rules}]
     if context:
