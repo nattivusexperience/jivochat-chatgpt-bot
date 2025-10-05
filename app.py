@@ -446,3 +446,13 @@ def bot_webhook(token):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
+
+@app.route("/kb_ls", methods=["GET"])
+def kb_ls():
+    brand = request.args.get("brand", "alandalus")
+    folder = brand_folder(brand)
+    try:
+        files = sorted(os.listdir(folder))
+    except Exception as e:
+        return jsonify({"brand": brand, "folder": folder, "error": str(e)}), 500
+    return jsonify({"brand": brand, "folder": folder, "files": files})
