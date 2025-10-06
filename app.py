@@ -199,12 +199,23 @@ def retrieve_context(query, brand=None, top_k=8, min_sim=0.50):
         k_hits = [(s, d) for s, d in k_hits if id(d) not in seen]
         hits = k_hits + hits
 
-    # Empuje precios/2026
-    if any(k in ql for k in ["precio", "precios", "coste", "price", "cost", "how much", "cuánto", "cuanto", "2026"]):
-        k_hits = keyword_hits(index_docs, ["precio", "precios", "2026", "€"], limit=3)
+    # Empuje PRECIOS (sin 2026 para no colar itinerarios/fechas)
+        if any(k in ql for k in ["precio", "precios", "coste", "price", "prices", "rate", "tarifa", "how much", "€"]):
+        k_hits = keyword_hits(index_docs, ["precio", "precios", "tarifa", "price", "prices", "rate", "€"], limit=5)
         seen = {id(d) for _, d in hits}
         k_hits = [(s, d) for s, d in k_hits if id(d) not in seen]
+        # Prioriza documentos cuyo título sugiera precios
+        k_hits.sort(key=lambda sd: ("precio" in sd[1]["title"].lower() or "price" in sd[1]["title"].lower()), reverse=True)
         hits = k_hits + hits
+
+   # Empuje 2026 (separado, favoreciendo precios si existen)
+   if "2026" in ql:
+        k_hits = keyword_hits(index_docs, ["2026"], limit=5)
+        seen = {id(d) for _, d in hits}
+       k_hits = [(s, d) for s, d in k_hits if id(d) not in seen]
+  # Si el título NO contiene "precio"/"price", quedan detrás
+        k_hits.sort(key=lambda sd: ("precio" in sd[1]["title"].lower() or "price" in sd[1]["title"].lower()), reverse=True)
+       hits = k_hits + hits
 
     # NUEVOS empujes bilingües (ES/EN)
     # Jurisdicción / Applicable law
