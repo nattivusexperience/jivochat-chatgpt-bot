@@ -473,6 +473,24 @@ def bot_webhook(token):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
+
+# =========================
+# Ruta para pruebas directas desde curl (/chat)
+# =========================
+@app.route("/chat", methods=["POST"])
+def chat():
+    data = request.get_json(force=True) or {}
+    query = data.get("query") or data.get("q") or ""
+    brand = data.get("brand") or "transcantabrico"
+    user_lang = data.get("user_lang") or "es"
+
+    try:
+        answer = rag_reply(user_text=query, brand=brand, user_lang=user_lang)
+        return jsonify({"ok": True, "brand": brand, "lang": user_lang, "answer": answer}), 200
+    except Exception as e:
+        print("Error en /chat:", repr(e))
+        return jsonify({"ok": False, "error": str(e)}), 500
+
 def load_policies_for_lang(brand: str, lang: str) -> str:
     base = pathlib.Path(brand_folder(brand)) / "config"
     name = "policies-en.md" if (lang or "").lower().startswith("en") else "policies-es.md"
