@@ -1,6 +1,41 @@
 from flask import Flask, request, jsonify
 from openai import OpenAI
-import os, glob, json, math, requests
+import os
+import pathlib, glob, json, math, requests
+import json
+
+
+# =========================
+# Retrieval configuration
+# =========================
+EMBED_MODEL = "text-embedding-3-small"
+CHARS_PER_CHUNK = 800
+KB_BASE = "kb"
+TOP_K = 8
+MIN_SIM = 0.50
+
+def load_retrieval_config():
+    """Load retrieval parameters from kb/transcantabrico/config/retrieval-config.json when available."""
+    global EMBED_MODEL, CHARS_PER_CHUNK, TOP_K, MIN_SIM
+    cfg_candidates = [
+        pathlib.Path(KB_BASE) / "transcantabrico" / "config" / "retrieval-config.json",
+        pathlib.Path(KB_BASE) / "config" / "retrieval-config.json",
+        pathlib.Path("retrieval-config.json"),
+    ]
+    for p in cfg_candidates:
+        if p.exists():
+            try:
+                cfg = json.loads(p.read_text(encoding="utf-8"))
+                EMBED_MODEL = cfg.get("embedding_model", EMBED_MODEL)
+                CHARS_PER_CHUNK = int(cfg.get("chunk_size", CHARS_PER_CHUNK))
+                TOP_K = int(cfg.get("retrieval", {}).get("top_k", TOP_K))
+                MIN_SIM = float(cfg.get("min_relevance_score", MIN_SIM))
+                print(f"[config] using {p} -> model={EMBED_MODEL} chunk={CHARS_PER_CHUNK} top_k={TOP_K} min_sim={MIN_SIM}")
+            except Exception as e:
+                print("[config] error reading retrieval-config.json:", repr(e))
+            break
+
+load_retrieval_config()
 
 app = Flask(__name__)
 app.config['JSON_AS_ASCII'] = False  # respuestas JSON en UTF-8 real
@@ -85,33 +120,50 @@ def index_path_for(brand: str) -> str:
     return f"kb_index_{safe}.json"
 
 def load_kb_files(kb_folder: str):
+    """Recursively load .md and .jsonl files from KB, chunking .md by CHARS_PER_CHUNK."""
     docs = []
-    # 1) .md
-    for path in sorted(glob.glob(os.path.join(kb_folder, "*.md"))):
-        with open(path, "r", encoding="utf-8") as f:
-            text = f.read().strip()
-        title = os.path.basename(path)
+    base = pathlib.Path(kb_folder)
+
+    # .md files
+    for path in sorted(base.rglob("*.md")):
+        try:
+            text = path.read_text(encoding="utf-8").strip()
+        except Exception:
+            continue
+        title = str(path.relative_to(base))
         for i in range(0, len(text), CHARS_PER_CHUNK):
             chunk = text[i:i+CHARS_PER_CHUNK].strip()
             if chunk:
                 docs.append({"title": title, "text": chunk})
-    # 2) .jsonl
-    for path in sorted(glob.glob(os.path.join(kb_folder, "*.jsonl"))):
-        with open(path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    rec = json.loads(line)
-                except Exception:
-                    continue
-                content = (rec.get("content") or "").strip()
-                # Normalización suave de emails con espacios
-                content = content.replace(" @", "@").replace("@ ", "@")
-                title = f"{os.path.basename(path)}::{rec.get('id') or rec.get('title') or 'chunk'}"
-                if content:
-                    docs.append({"title": title, "text": content})
+
+    # .jsonl files with metadata
+    for path in sorted(base.rglob("*.jsonl")):
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except Exception:
+            continue
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except Exception:
+                continue
+            content = (rec.get("content") or "").strip()
+            if not content:
+                continue
+            content = content.replace(" @", "@").replace("@ ", "@")
+            title = f"{path.relative_to(base)}::{rec.get('id') or rec.get('title') or 'chunk'}"
+            meta = {
+                "language": rec.get("language"),
+                "product": rec.get("product"),
+                "priority": rec.get("priority"),
+                "last_updated": rec.get("last_updated") or rec.get("valid_to") or rec.get("valid_from"),
+            }
+            doc = {"title": title, "text": content}
+            doc.update({k: v for k, v in meta.items() if v is not None})
+            docs.append(doc)
     return docs
 
 def build_index_for(brand: str):
@@ -170,84 +222,35 @@ def _push_keyword_hits(index_docs, hits, ql, triggers, targets, limit=3):
         hits = k_hits + hits
     return hits
 
-def retrieve_context(query, brand=None, top_k=8, min_sim=0.50):
+def retrieve_context(query, brand=None, top_k=None, min_sim=None, lang_hint=None):
+    top_k = top_k or TOP_K
+    min_sim = min_sim or MIN_SIM
     index_docs = get_index(brand)
     if not index_docs:
         return []
 
-    q_emb = client.embeddings.create(model=EMBED_MODEL, input=[query]).data[0].embedding
+    def _passes(doc):
+        ok = True
+        if lang_hint and doc.get("language"):
+            ok = ok and (doc["language"].lower().startswith((lang_hint or "")[:2]))
+        if brand and doc.get("product"):
+            ok = ok and (doc["product"] == brand)
+        return ok
 
-    scored = []
-    for d in index_docs:
-        s = cos_sim(q_emb, d["embedding"])
-        scored.append((s, d))
+    filtered = [d for d in index_docs if _passes(d)]
+    pool = filtered or index_docs
+
+    q_emb = client.embeddings.create(model=EMBED_MODEL, input=[query]).data[0].embedding
+    scored = [(cos_sim(q_emb, d.get("embedding")), d) for d in pool]
     scored.sort(key=lambda x: x[0], reverse=True)
 
-    # Permisivo si parece inglés (para recall multilingüe)
     ql = (query or "").lower()
-    is_en_like = any(m in ql for m in [" how ", "how much", "price", "cost", "what", "when", "where", "is there", "do you", "terms of use", "applicable law", "jurisdiction"])
+    is_en_like = any(m in ql for m in [" how ", "how much", "price", "cost", "what", "when", "where", "is there", "do you"])
     local_min_sim = 0.45 if is_en_like else min_sim
 
     hits = [(s, d) for s, d in scored[:top_k] if s >= local_min_sim]
     if not hits and scored:
-        hits = scored[:2]  # siempre algo
-
-    # Empujes existentes: "incluye"
-    if ("incluye" in ql) or ("qué incluye" in ql) or ("que incluye" in ql):
-        k_hits = keyword_hits(index_docs, ["incluye"], limit=2)
-        seen = {id(d) for _, d in hits}
-        k_hits = [(s, d) for s, d in k_hits if id(d) not in seen]
-        hits = k_hits + hits
-
-    # Empuje PRECIOS (sin 2026 para no colar itinerarios/fechas)
-        if any(k in ql for k in ["precio", "precios", "coste", "price", "prices", "rate", "tarifa", "how much", "€"]):
-        k_hits = keyword_hits(index_docs, ["precio", "precios", "tarifa", "price", "prices", "rate", "€"], limit=5)
-        seen = {id(d) for _, d in hits}
-        k_hits = [(s, d) for s, d in k_hits if id(d) not in seen]
-        # Prioriza documentos cuyo título sugiera precios
-        k_hits.sort(key=lambda sd: ("precio" in sd[1]["title"].lower() or "price" in sd[1]["title"].lower()), reverse=True)
-        hits = k_hits + hits
-
-   # Empuje 2026 (separado, favoreciendo precios si existen)
-   if "2026" in ql:
-        k_hits = keyword_hits(index_docs, ["2026"], limit=5)
-        seen = {id(d) for _, d in hits}
-       k_hits = [(s, d) for s, d in k_hits if id(d) not in seen]
-  # Si el título NO contiene "precio"/"price", quedan detrás
-        k_hits.sort(key=lambda sd: ("precio" in sd[1]["title"].lower() or "price" in sd[1]["title"].lower()), reverse=True)
-       hits = k_hits + hits
-
-    # NUEVOS empujes bilingües (ES/EN)
-    # Jurisdicción / Applicable law
-    hits = _push_keyword_hits(index_docs, hits, ql,
-                              triggers=["jurisdicción", "juzgados", "competent court", "competent courts", "applicable law", "jurisdiction", "ley aplicable"],
-                              targets=["jurisdicción", "juzgados", "aplicable", "applicable", "jurisdiction", "ley aplicable"],
-                              limit=3)
-
-    # Términos de uso / Terms of use
-    hits = _push_keyword_hits(index_docs, hits, ql,
-                              triggers=["términos de uso", "terminos de uso", "terms of use", "legal notice", "terms"],
-                              targets=["términos", "terminos", "terms", "legal notice"],
-                              limit=2)
-
-    # Política de privacidad / Privacy policy
-    hits = _push_keyword_hits(index_docs, hits, ql,
-                              triggers=["política de privacidad", "politica de privacidad", "privacy policy", "data protection"],
-                              targets=["política de privacidad", "privacy policy", "protección de datos", "data protection"],
-                              limit=2)
-
-    # Condiciones de reserva / Booking conditions
-    hits = _push_keyword_hits(index_docs, hits, ql,
-                              triggers=["condiciones de reserva", "booking conditions", "booking terms", "reserva"],
-                              targets=["condiciones de reserva", "booking conditions", "booking terms"],
-                              limit=2)
-
-    # Contacto / Email
-    hits = _push_keyword_hits(index_docs, hits, ql,
-                              triggers=["contacto", "email", "contact", "correo"],
-                              targets=["contacto", "email", "info@", "contact"],
-                              limit=2)
-
+        hits = scored[:2]
     return hits[:top_k]
 
 def format_context(scored):
@@ -288,11 +291,11 @@ def translate(text: str, target_lang: str) -> str:
 # RAG principal
 # =========================
 FALLBACK_EMAIL_BY_BRAND = {
-    "alandalus": "info@eltrenalandalus.com",
-    "transcantabrico": "info@eltrentranscantabrico.com",
-    "costaverde": "info@trencostaverdeexpress.com",
-    "robla": "info@trenexpresodelarobla.com",
-    None: "info@eltrenalandalus.com",
+    "alandalus": "info@nattivus.com",
+    "transcantabrico": "info@nattivus.com",
+    "costaverde": "info@nattivus.com",
+    "robla": "info@nattivus.com",
+    None: "info@nattivus.com",
 }
 
 def rag_reply(user_text: str, brand: str = None, user_lang: str = None) -> str:
@@ -470,3 +473,11 @@ def bot_webhook(token):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
+def load_policies_for_lang(brand: str, lang: str) -> str:
+    base = pathlib.Path(brand_folder(brand)) / "config"
+    name = "policies-en.md" if (lang or "").lower().startswith("en") else "policies-es.md"
+    p = base / name
+    try:
+        return p.read_text(encoding="utf-8")
+    except Exception:
+        return ""
