@@ -302,7 +302,7 @@ FALLBACK_EMAIL_BY_BRAND = {
 
 def rag_reply(user_text: str, brand: str = None, user_lang: str = None) -> str:
     detected = detect_lang(user_text)
-    user_lang = detected  # Prioriza el idioma detectado para la respuesta
+    user_lang = user_lang or detected
     query_for_kb = user_text if detected == 'es' else translate(user_text, 'es')
 
     hits = retrieve_context(query_for_kb, brand=brand, top_k=TOP_K, min_sim=MIN_SIM, lang_hint=user_lang)
