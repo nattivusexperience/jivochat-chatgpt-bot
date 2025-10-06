@@ -470,9 +470,6 @@ def bot_webhook(token):
     bot_message(chat_id, reply, token)
     return jsonify({"result": "ok"})
 
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
 
 # =========================
 # Ruta para pruebas directas desde curl (/chat)
@@ -490,6 +487,10 @@ def chat():
     except Exception as e:
         print("Error en /chat:", repr(e))
         return jsonify({"ok": False, "error": str(e)}), 500
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
 
 def load_policies_for_lang(brand: str, lang: str) -> str:
     base = pathlib.Path(brand_folder(brand)) / "config"
