@@ -337,7 +337,7 @@ def detect_brand_from_event(event: dict) -> str:
 def index():
     return "Bot activo (RAG + Jivo Bot API)"
 
-@app.route("/kb_ls", methods=["GET"])
+@app.route("/kb", methods=["GET"])
 def kb_ls():
     brand = request.args.get("brand", "alandalus")
     folder = brand_folder(brand)
