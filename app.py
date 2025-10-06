@@ -22,14 +22,12 @@ except Exception:
     BOT_ENABLED_MAP = {}
 
 # Tokens permitidos (para /bot/<token>) y su "grupo" (opcional)
-# En tu caso: {"jivo_tt_9A7xQ2LmC4fD":"trenes"}
 try:
     TOKEN_MAP = json.loads(os.getenv("JIVO_TOKEN_MAP", "{}"))
 except Exception:
     TOKEN_MAP = {}
 
 # provider_id por token (cuando Jivo te lo envíe)
-# Ej: {"jivo_tt_9A7xQ2LmC4fD":"PROV123"}
 try:
     PROVIDER_MAP = json.loads(os.getenv("JIVO_PROVIDER_MAP", "{}"))
 except Exception:
@@ -76,11 +74,6 @@ def cos_sim(a, b):
 # Carga/Troceado de KB
 # =========================
 def brand_folder(brand: str) -> str:
-    """
-    Devuelve la carpeta de KB para una marca:
-    - Si existe kb/<brand>/, úsala.
-    - Si no, usa kb/ raíz (modo actual).
-    """
     if brand:
         candidate = os.path.join(KB_BASE, brand)
         if os.path.isdir(candidate):
@@ -88,16 +81,12 @@ def brand_folder(brand: str) -> str:
     return KB_BASE
 
 def index_path_for(brand: str) -> str:
-    """
-    Fichero de índice por marca. Si no hay marca, usa el índice general.
-    """
     safe = (brand or "general").replace("/", "_")
     return f"kb_index_{safe}.json"
 
 def load_kb_files(kb_folder: str):
     docs = []
-
-    # 1) .md (como ya tenías)
+    # 1) .md
     for path in sorted(glob.glob(os.path.join(kb_folder, "*.md"))):
         with open(path, "r", encoding="utf-8") as f:
             text = f.read().strip()
@@ -106,8 +95,7 @@ def load_kb_files(kb_folder: str):
             chunk = text[i:i+CHARS_PER_CHUNK].strip()
             if chunk:
                 docs.append({"title": title, "text": chunk})
-
-    # 2) .jsonl (NUEVO)
+    # 2) .jsonl
     for path in sorted(glob.glob(os.path.join(kb_folder, "*.jsonl"))):
         with open(path, "r", encoding="utf-8") as f:
             for line in f:
@@ -119,12 +107,11 @@ def load_kb_files(kb_folder: str):
                 except Exception:
                     continue
                 content = (rec.get("content") or "").strip()
+                # Normalización suave de emails con espacios
+                content = content.replace(" @", "@").replace("@ ", "@")
                 title = f"{os.path.basename(path)}::{rec.get('id') or rec.get('title') or 'chunk'}"
                 if content:
-                    # Normalización suave: emails con espacios tipo "info@ eltrenalandalus.com"
-                    content = content.replace(" @", "@").replace("@ ", "@")
                     docs.append({"title": title, "text": content})
-
     return docs
 
 def build_index_for(brand: str):
@@ -161,7 +148,7 @@ def get_index(brand: str):
     return INDEX_CACHE[key]
 
 # =========================
-# Recuperación con fallback
+# Recuperación con fallback y empujes bilingües
 # =========================
 def keyword_hits(index_docs, keywords, limit=3):
     hits = []
@@ -172,6 +159,15 @@ def keyword_hits(index_docs, keywords, limit=3):
             hits.append((0.99, d))
             if len(hits) >= limit:
                 break
+    return hits
+
+def _push_keyword_hits(index_docs, hits, ql, triggers, targets, limit=3):
+    """Empuja candidatos por keywords si se activan los triggers en la query."""
+    if any(k in ql for k in triggers):
+        k_hits = keyword_hits(index_docs, targets, limit=limit)
+        seen = {id(d) for _, d in hits}
+        k_hits = [(s, d) for s, d in k_hits if id(d) not in seen]
+        hits = k_hits + hits
     return hits
 
 def retrieve_context(query, brand=None, top_k=8, min_sim=0.50):
@@ -187,24 +183,59 @@ def retrieve_context(query, brand=None, top_k=8, min_sim=0.50):
         scored.append((s, d))
     scored.sort(key=lambda x: x[0], reverse=True)
 
-    hits = [(s, d) for s, d in scored[:top_k] if s >= min_sim]
+    # Permisivo si parece inglés (para recall multilingüe)
+    ql = (query or "").lower()
+    is_en_like = any(m in ql for m in [" how ", "how much", "price", "cost", "what", "when", "where", "is there", "do you", "terms of use", "applicable law", "jurisdiction"])
+    local_min_sim = 0.45 if is_en_like else min_sim
+
+    hits = [(s, d) for s, d in scored[:top_k] if s >= local_min_sim]
     if not hits and scored:
         hits = scored[:2]  # siempre algo
 
-    ql = (query or "").lower()
-    # empujar "incluye"
+    # Empujes existentes: "incluye"
     if ("incluye" in ql) or ("qué incluye" in ql) or ("que incluye" in ql):
         k_hits = keyword_hits(index_docs, ["incluye"], limit=2)
         seen = {id(d) for _, d in hits}
         k_hits = [(s, d) for s, d in k_hits if id(d) not in seen]
         hits = k_hits + hits
 
-    # empujar "precio/coste/2026"
+    # Empuje precios/2026
     if any(k in ql for k in ["precio", "precios", "coste", "price", "cost", "how much", "cuánto", "cuanto", "2026"]):
         k_hits = keyword_hits(index_docs, ["precio", "precios", "2026", "€"], limit=3)
         seen = {id(d) for _, d in hits}
         k_hits = [(s, d) for s, d in k_hits if id(d) not in seen]
         hits = k_hits + hits
+
+    # NUEVOS empujes bilingües (ES/EN)
+    # Jurisdicción / Applicable law
+    hits = _push_keyword_hits(index_docs, hits, ql,
+                              triggers=["jurisdicción", "juzgados", "competent court", "competent courts", "applicable law", "jurisdiction", "ley aplicable"],
+                              targets=["jurisdicción", "juzgados", "aplicable", "applicable", "jurisdiction", "ley aplicable"],
+                              limit=3)
+
+    # Términos de uso / Terms of use
+    hits = _push_keyword_hits(index_docs, hits, ql,
+                              triggers=["términos de uso", "terminos de uso", "terms of use", "legal notice", "terms"],
+                              targets=["términos", "terminos", "terms", "legal notice"],
+                              limit=2)
+
+    # Política de privacidad / Privacy policy
+    hits = _push_keyword_hits(index_docs, hits, ql,
+                              triggers=["política de privacidad", "politica de privacidad", "privacy policy", "data protection"],
+                              targets=["política de privacidad", "privacy policy", "protección de datos", "data protection"],
+                              limit=2)
+
+    # Condiciones de reserva / Booking conditions
+    hits = _push_keyword_hits(index_docs, hits, ql,
+                              triggers=["condiciones de reserva", "booking conditions", "booking terms", "reserva"],
+                              targets=["condiciones de reserva", "booking conditions", "booking terms"],
+                              limit=2)
+
+    # Contacto / Email
+    hits = _push_keyword_hits(index_docs, hits, ql,
+                              triggers=["contacto", "email", "contact", "correo"],
+                              targets=["contacto", "email", "info@", "contact"],
+                              limit=2)
 
     return hits[:top_k]
 
@@ -222,7 +253,6 @@ def detect_lang(text: str) -> str:
     es_markers = [" qué", "cuál", "cuanto", "cuánto", "precio", "fechas", "incluye", "dónde", "cuando", "política"]
     if any(m in t for m in es_markers):
         return "es"
-    # por defecto español
     return "es"
 
 def translate(text: str, target_lang: str) -> str:
@@ -251,7 +281,7 @@ FALLBACK_EMAIL_BY_BRAND = {
     "transcantabrico": "info@eltrentranscantabrico.com",
     "costaverde": "info@trencostaverdeexpress.com",
     "robla": "info@trenexpresodelarobla.com",
-    None: "info@eltrenalandalus.com",   # default razonable
+    None: "info@eltrenalandalus.com",
 }
 
 def rag_reply(user_text: str, brand: str = None, user_lang: str = None) -> str:
@@ -271,13 +301,11 @@ def rag_reply(user_text: str, brand: str = None, user_lang: str = None) -> str:
         f"'No dispongo de esa información en la base de conocimiento. Por favor, escribe a {fallback_email}.' "
         f"Si hay contexto, extrae y lista los elementos relevantes respetando medidas, nombres y detalles."
     )
-    ...
-
 
     messages = [{"role": "system", "content": system_rules}]
     if context:
         messages.append({"role": "system", "content": f"Base de conocimiento:\n{context}"})
-    messages.append({"role": "user", "content": user_text})  # mantenemos el idioma del usuario
+    messages.append({"role": "user", "content": user_text})
 
     try:
         resp = client.chat.completions.create(
@@ -285,7 +313,7 @@ def rag_reply(user_text: str, brand: str = None, user_lang: str = None) -> str:
             messages=messages,
             temperature=0.0,
             max_tokens=900
-    )
+        )
         return resp.choices[0].message.content.strip()
     except Exception as e:
         print("Error OpenAI:", repr(e))
@@ -295,16 +323,12 @@ def rag_reply(user_text: str, brand: str = None, user_lang: str = None) -> str:
 # Utilidades Jivo
 # =========================
 def detect_brand_from_event(event: dict) -> str:
-    """
-    Detecta la marca (tren) por el dominio del canal/datos del evento.
-    Si no encuentra nada, devuelve None y usaremos la KB general (kb/).
-    """
     blob = json.dumps(event, ensure_ascii=False).lower()
     if "eltrentranscantabrico.com" in blob: return "transcantabrico"
     if "eltrenalandalus.com"       in blob: return "alandalus"
     if "trencostaverdeexpress.com" in blob: return "costaverde"
     if "trenexpresodelarobla.com"  in blob: return "robla"
-    return None  # KB general (kb/)
+    return None
 
 # =========================
 # Rutas HTTP
@@ -313,14 +337,18 @@ def detect_brand_from_event(event: dict) -> str:
 def index():
     return "Bot activo (RAG + Jivo Bot API)"
 
+@app.route("/kb_ls", methods=["GET"])
+def kb_ls():
+    brand = request.args.get("brand", "alandalus")
+    folder = brand_folder(brand)
+    try:
+        files = sorted(os.listdir(folder))
+        return jsonify({"brand": brand, "folder": folder, "files": files})
+    except Exception as e:
+        return jsonify({"brand": brand, "folder": folder, "error": str(e)}), 500
+
 @app.route("/reindex", methods=["POST"])
 def reindex():
-    """
-    Reconstruye índices. Opciones:
-    - Sin body: reindexa todas las marcas detectables (kb/ y subcarpetas directas).
-    - Body JSON: {"brand":"transcantabrico"} reindexa solo esa marca.
-    Protege opcionalmente con ADMIN_TOKEN en header 'X-Admin-Token'.
-    """
     token = request.headers.get("X-Admin-Token")
     admin = os.environ.get("ADMIN_TOKEN")
     if admin and token != admin:
@@ -339,9 +367,7 @@ def reindex():
     if brand:
         do_brand(brand)
     else:
-        # reindex kb/ general
         do_brand(None)
-        # reindex subcarpetas directas como marcas
         if os.path.isdir(KB_BASE):
             for name in os.listdir(KB_BASE):
                 sub = os.path.join(KB_BASE, name)
@@ -352,10 +378,6 @@ def reindex():
 
 @app.route("/debug_search", methods=["POST"])
 def debug_search():
-    """
-    Diagnóstico: ver qué trozos devuelve el recuperador.
-    Body JSON: {"q": "...", "brand": "transcantabrico"}
-    """
     data = request.json or {}
     q = data.get("q", "")
     brand = data.get("brand")
@@ -364,9 +386,6 @@ def debug_search():
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    """
-    Endpoint genérico (curl/pruebas). Usa la KB general (kb/) salvo que envíes {"brand":"..."}.
-    """
     data = request.json or {}
     user_message = (
         data.get("message")
@@ -375,29 +394,31 @@ def webhook():
         or (data.get("data") or {}).get("text")
         or ""
     ).strip()
-    brand = data.get("brand")  # opcional en pruebas
+    brand = data.get("brand")
+    debug = bool(data.get("debug"))
 
     if not user_message:
         return jsonify({"reply": "¿Podrías reformular tu pregunta?"})
 
-    # responder en el idioma del usuario (detección simple)
     user_lang = detect_lang(user_message)
+    query_for_kb = user_message if user_lang == "es" else translate(user_message, "es")
+    hits = retrieve_context(query_for_kb, brand=brand, top_k=8, min_sim=0.50)
+
     reply = rag_reply(user_message, brand=brand, user_lang=user_lang)
-    return jsonify({"reply": reply})
+    resp = {"reply": reply}
+    if debug:
+        resp["debug"] = {
+            "brand": brand or "general",
+            "index_file": index_path_for(brand),
+            "sources": [{"sim": round(s, 3), "title": d["title"], "preview": d["text"][:200]} for s, d in hits]
+        }
+    return jsonify(resp)
 
 @app.route("/bot/<token>", methods=["POST"])
 def bot_webhook(token):
-    """
-    Endpoint oficial para Jivo Bot API.
-    - Valida token.
-    - Detecta marca por dominio del evento.
-    - Responde con KB y hace handoff a agente si procede.
-    """
-    # Validación de token
     if TOKEN_MAP and token not in TOKEN_MAP:
         return jsonify({"error": "unauthorized"}), 401
 
-    # Toggle encendido/apagado
     enabled_for_token = BOT_ENABLED_MAP.get(token, True)
     if not BOT_ENABLED or not enabled_for_token:
         return jsonify({"result": "bot_disabled"})
@@ -408,7 +429,6 @@ def bot_webhook(token):
     msg = (event.get("message") or {})
     text_in = (msg.get("text") or "").strip()
 
-    # Eventos del sistema
     if ev_type == "AGENT_JOINED":
         print("Agente se unió al chat", chat_id)
         return jsonify({"result": "ok"})
@@ -418,23 +438,16 @@ def bot_webhook(token):
     if ev_type != "CLIENT_MESSAGE" or not chat_id or not text_in:
         return jsonify({"result": "ignored"})
 
-    # Handoff por petición explícita
     low = text_in.lower()
     if any(k in low for k in ["agente", "humano", "asesor", "speak to agent", "human", "operator"]):
         bot_message(chat_id, "Te paso con un agente humano ahora mismo.", token)
         invite_agent(chat_id, token)
         return jsonify({"result": "ok"})
 
-    # Detectar marca según dominio del canal
     brand = detect_brand_from_event(event)
-
-    # Idioma del usuario
     user_lang = detect_lang(text_in)
-
-    # Respuesta con RAG (KB de la marca si existe carpeta kb/<brand>, si no kb/ general)
     reply = rag_reply(text_in, brand=brand, user_lang=user_lang)
 
-    # Handoff si no hay información en KB
     if reply.strip().startswith("No dispongo de esa información"):
         bot_message(chat_id, "Te paso con un agente humano para que te ayude mejor.", token)
         invite_agent(chat_id, token)
@@ -446,13 +459,3 @@ def bot_webhook(token):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
-
-@app.route("/kb_ls", methods=["GET"])
-def kb_ls():
-    brand = request.args.get("brand", "alandalus")
-    folder = brand_folder(brand)
-    try:
-        files = sorted(os.listdir(folder))
-    except Exception as e:
-        return jsonify({"brand": brand, "folder": folder, "error": str(e)}), 500
-    return jsonify({"brand": brand, "folder": folder, "files": files})
