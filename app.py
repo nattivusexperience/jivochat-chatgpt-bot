@@ -291,10 +291,10 @@ def translate(text: str, target_lang: str) -> str:
 # RAG principal
 # =========================
 FALLBACK_EMAIL_BY_BRAND = {
-    "alandalus": "info@nattivus.com",
-    "transcantabrico": "info@nattivus.com",
-    "costaverde": "info@nattivus.com",
-    "robla": "info@nattivus.com",
+    "alandalus": "info@eltrenalandalus.com",
+    "transcantabrico": "info@eltrentranscantabrico.com",
+    "costaverde": "info@trencostaverdeexpress.com",
+    "robla": "info@trenexpresodelarobla.com",
     None: "info@nattivus.com",
 }
 
