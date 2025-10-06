@@ -1,0 +1,23 @@
+{
+  "embedding_model": "text-embedding-3-large",
+  "chunk_size": 800,
+  "chunk_overlap": 100,
+  "default_language": "es",
+  "product": "transcantabrico",
+  "retrieval": {
+    "top_k": 8,
+    "filters": {
+      "language": ["es", "en"],
+      "product": "transcantabrico"
+    },
+    "re_rank_weights": {
+      "similarity": 0.7,
+      "priority": 0.2,
+      "recency": 0.1
+    }
+  },
+  "min_relevance_score": 0.65,
+  "max_context_chunks": 5,
+  "combine_same_doc_sections": true,
+  "fallback_message": "No tengo esa información exacta. ¿Quieres que te conecte con nuestro equipo para confirmarla?"
+}
