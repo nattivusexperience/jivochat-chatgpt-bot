@@ -2,9 +2,65 @@ services:
   - type: web
     name: jivochat-chatgpt-bot
     env: python
-    plan: free
+    plan: free                # Puedes pasar a 'starter' o 'standard' si los embeddings o logs crecen
     buildCommand: pip install -r requirements.txt
     startCommand: python app.py
+
     envVars:
-      - key: OPENAI_API_KEY
+      # === CLAVES PRINCIPALES ===
+      - key: OPENAI_API_KEY          # Tu clave real se configurará en el panel de Render
         sync: false
+
+      # === CONFIGURACIÓN GENERAL ===
+      - key: BOT_ENABLED             # Activa o desactiva globalmente el bot
+        value: "true"
+      - key: KB_BASE                 # Carpeta base de la KB dentro del repo
+        value: "kb"
+
+      # === MODELO DE EMBEDDINGS ===
+      - key: EMBED_MODEL
+        value: "text-embedding-3-small"
+
+      # === MAPEO DE TOKENS / CANALES ===
+      # Cada token corresponde a un canal de Jivochat (uno por idioma y tren)
+      - key: JIVO_TOKEN_MAP
+        value: |
+          {
+            "jivo_al_andalus_es": "al-andalus",
+            "jivo_al_andalus_en": "al-andalus",
+            "jivo_transcantabrico_es": "transcantabrico",
+            "jivo_transcantabrico_en": "transcantabrico",
+            "jivo_costa_verde_es": "costa-verde-express",
+            "jivo_costa_verde_en": "costa-verde-express",
+            "jivo_robla_es": "expreso-de-la-robla",
+            "jivo_robla_en": "expreso-de-la-robla"
+          }
+
+      # === CANALES ACTIVOS / DESACTIVADOS ===
+      - key: BOT_ENABLED_MAP
+        value: |
+          {
+            "jivo_al_andalus_es": true,
+            "jivo_al_andalus_en": true,
+            "jivo_transcantabrico_es": true,
+            "jivo_transcantabrico_en": true,
+            "jivo_costa_verde_es": true,
+            "jivo_costa_verde_en": true,
+            "jivo_robla_es": true,
+            "jivo_robla_en": true
+          }
+
+      # === IDIOMA POR DEFECTO (por si el canal no lo especifica) ===
+      - key: DEFAULT_LANGUAGE
+        value: "es"
+
+      # === LOGS / DEBUG ===
+      - key: LOG_LEVEL
+        value: "info"
+      - key: DEBUG
+        value: "false"
+
+      # === OPCIONAL: CACHÉ EMBEDDINGS LOCAL ===
+      # Si usáis almacenamiento persistente (por ejemplo, Render Disk)
+      - key: EMBEDDINGS_CACHE_PATH
+        value: "/data/embeddings"
