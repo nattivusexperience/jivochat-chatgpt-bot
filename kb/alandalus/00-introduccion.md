@@ -1,2 +1,0 @@
-¿QUÉ ES EL TREN AL ÁNDALUS?
-El Tren Al Ándalus es un tren turístico de lujo que realiza un viaje de 7 días y 6 noches por el sur y centro de España, con dos itinerarios espejo: Sevilla a Madrid, y Madrid a Sevilla. Combina alojamiento en suites, gastronomía española, excursiones con entradas y un servicio a bordo de inspiración Belle Époque. Capacidad aproximada: 64 pasajeros en 14 coches (restaurantes, bar, salón de juegos, coches cama, tripulación y generador).
