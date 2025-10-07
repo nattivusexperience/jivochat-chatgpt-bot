@@ -1,3 +1,8 @@
-Flask
-openai>=1.40.0
-requests
+# Runtime: Python 3.10+ (usa | en type hints)
+Flask==3.0.3
+openai>=1.40.0,<2.0.0
+requests>=2.31.0,<3.0.0
+gunicorn>=21.2.0,<22.0.0
+
+# Opcional (local/dev)
+python-dotenv>=1.0.1  # cargar .env en local
