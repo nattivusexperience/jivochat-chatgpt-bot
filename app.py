@@ -11,8 +11,14 @@ client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 # Configuración general
 # =========================
 EMBED_MODEL = "text-embedding-3-small"
+CHAT_MODEL = "gpt-4o-mini"
 CHARS_PER_CHUNK = 800
-KB_BASE = "kb"  # carpeta base de la KB
+
+KB_BASE = "kb"            # carpeta base de la KB
+KB_COMMON = "common"      # subcarpeta de contenidos comunes
+
+TOP_K = 8                 # top de documentos a recuperar
+MIN_SIM = 0.50            # similitud mínima por defecto
 
 # Toggle encendido/apagado del bot
 BOT_ENABLED = os.getenv("BOT_ENABLED", "true").lower() == "true"
@@ -33,7 +39,7 @@ try:
 except Exception:
     PROVIDER_MAP = {}
 
-def jivo_endpoint_for(token: str) -> str:
+def jivo_endpoint_for(token: str) -> str | None:
     provider_id = PROVIDER_MAP.get(token, "")
     return f"https://bot.jivosite.com/webhooks/{provider_id}/{token}" if provider_id else None
 
@@ -73,50 +79,83 @@ def cos_sim(a, b):
 # =========================
 # Carga/Troceado de KB
 # =========================
-def brand_folder(brand: str) -> str:
+def brand_folder(brand: str | None) -> str | None:
+    """Devuelve la carpeta de la marca si existe, p.ej. kb/alandalus; si no existe, None."""
     if brand:
         candidate = os.path.join(KB_BASE, brand)
         if os.path.isdir(candidate):
             return candidate
-    return KB_BASE
+    return None
 
-def index_path_for(brand: str) -> str:
+def common_folder() -> str:
+    return os.path.join(KB_BASE, KB_COMMON)
+
+def index_path_for(brand: str | None) -> str:
     safe = (brand or "general").replace("/", "_")
-    return f"kb_index_{safe}.json"
+    return f"kb_index_{safe}_v2.json"
 
-def load_kb_files(kb_folder: str):
+def _read_file(path: str) -> str:
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read().strip()
+
+def _iter_files_rec(folder: str, pattern: str):
+    # Busca recursivamente
+    yield from glob.iglob(os.path.join(folder, "**", pattern), recursive=True)
+
+def _chunk_text(title: str, text: str):
+    for i in range(0, len(text), CHARS_PER_CHUNK):
+        chunk = text[i:i+CHARS_PER_CHUNK].strip()
+        if chunk:
+            yield {"title": title, "text": chunk}
+
+def load_kb_files_from_folder(folder: str) -> list[dict]:
     docs = []
     # 1) .md
-    for path in sorted(glob.glob(os.path.join(kb_folder, "*.md"))):
-        with open(path, "r", encoding="utf-8") as f:
-            text = f.read().strip()
-        title = os.path.basename(path)
-        for i in range(0, len(text), CHARS_PER_CHUNK):
-            chunk = text[i:i+CHARS_PER_CHUNK].strip()
-            if chunk:
-                docs.append({"title": title, "text": chunk})
+    for path in sorted(_iter_files_rec(folder, "*.md")):
+        try:
+            text = _read_file(path)
+        except Exception:
+            continue
+        title = os.path.relpath(path, KB_BASE)
+        for rec in _chunk_text(title, text):
+            docs.append(rec)
     # 2) .jsonl
-    for path in sorted(glob.glob(os.path.join(kb_folder, "*.jsonl"))):
-        with open(path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    rec = json.loads(line)
-                except Exception:
-                    continue
-                content = (rec.get("content") or "").strip()
-                # Normalización suave de emails con espacios
-                content = content.replace(" @", "@").replace("@ ", "@")
-                title = f"{os.path.basename(path)}::{rec.get('id') or rec.get('title') or 'chunk'}"
-                if content:
-                    docs.append({"title": title, "text": content})
+    for path in sorted(_iter_files_rec(folder, "*.jsonl")):
+        try:
+            lines = _read_file(path).splitlines()
+        except Exception:
+            continue
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except Exception:
+                continue
+            content = (rec.get("content") or "").strip()
+            # Normalización suave de emails con espacios
+            content = content.replace(" @", "@").replace("@ ", "@")
+            rec_id = rec.get("id") or rec.get("slug") or rec.get("title") or "chunk"
+            title = f"{os.path.relpath(path, KB_BASE)}::{rec_id}"
+            if content:
+                docs.append({"title": title, "text": content})
     return docs
 
-def build_index_for(brand: str):
-    folder = brand_folder(brand)
-    docs = load_kb_files(folder)
+def load_kb_for_brand_including_common(brand: str | None) -> list[dict]:
+    docs = []
+    # Primero common (para que, a igualdad, la marca pueda “empujar” arriba)
+    common = common_folder()
+    if os.path.isdir(common):
+        docs.extend(load_kb_files_from_folder(common))
+    # Luego carpeta de marca (si existe)
+    bfolder = brand_folder(brand)
+    if bfolder and os.path.isdir(bfolder):
+        docs.extend(load_kb_files_from_folder(bfolder))
+    return docs
+
+def build_index_for(brand: str | None):
+    docs = load_kb_for_brand_including_common(brand)
     if not docs:
         return []
     inputs = [d["text"] for d in docs]
@@ -128,7 +167,7 @@ def build_index_for(brand: str):
         json.dump(docs, f, ensure_ascii=False)
     return docs
 
-def load_or_build_index_for(brand: str):
+def load_or_build_index_for(brand: str | None):
     idx_path = index_path_for(brand)
     if os.path.exists(idx_path):
         try:
@@ -139,16 +178,16 @@ def load_or_build_index_for(brand: str):
     return build_index_for(brand)
 
 # caché de índices por marca
-INDEX_CACHE = {}
+INDEX_CACHE: dict[str, list[dict]] = {}
 
-def get_index(brand: str):
+def get_index(brand: str | None):
     key = brand or "general"
     if key not in INDEX_CACHE:
         INDEX_CACHE[key] = load_or_build_index_for(brand)
     return INDEX_CACHE[key]
 
 # =========================
-# Recuperación con fallback y empujes bilingües
+# Recuperación con empujes bilingües
 # =========================
 def keyword_hits(index_docs, keywords, limit=3):
     hits = []
@@ -162,7 +201,6 @@ def keyword_hits(index_docs, keywords, limit=3):
     return hits
 
 def _push_keyword_hits(index_docs, hits, ql, triggers, targets, limit=3):
-    """Empuja candidatos por keywords si se activan los triggers en la query."""
     if any(k in ql for k in triggers):
         k_hits = keyword_hits(index_docs, targets, limit=limit)
         seen = {id(d) for _, d in hits}
@@ -170,7 +208,7 @@ def _push_keyword_hits(index_docs, hits, ql, triggers, targets, limit=3):
         hits = k_hits + hits
     return hits
 
-def retrieve_context(query, brand=None, top_k=8, min_sim=0.50):
+def retrieve_context(query, brand=None, top_k=TOP_K, min_sim=MIN_SIM, lang_hint: str | None = None):
     index_docs = get_index(brand)
     if not index_docs:
         return []
@@ -183,24 +221,26 @@ def retrieve_context(query, brand=None, top_k=8, min_sim=0.50):
         scored.append((s, d))
     scored.sort(key=lambda x: x[0], reverse=True)
 
-    # Permisivo si parece inglés (para recall multilingüe)
     ql = (query or "").lower()
-    is_en_like = any(m in ql for m in [" how ", "how much", "price", "cost", "what", "when", "where", "is there", "do you", "terms of use", "applicable law", "jurisdiction"])
-    local_min_sim = 0.45 if is_en_like else min_sim
+    is_en_like = any(m in ql for m in [
+        " how ", "how much", "price", "cost", "what", "when", "where",
+        "is there", "do you", "terms of use", "applicable law", "jurisdiction"
+    ])
+    local_min_sim = 0.45 if is_en_like or lang_hint == 'en' else min_sim
 
     hits = [(s, d) for s, d in scored[:top_k] if s >= local_min_sim]
     if not hits and scored:
         hits = scored[:2]  # siempre algo
 
-    # Empujes existentes: "incluye"
-    if ("incluye" in ql) or ("qué incluye" in ql) or ("que incluye" in ql):
-        k_hits = keyword_hits(index_docs, ["incluye"], limit=2)
+    # Empujes
+    if ("incluye" in ql) or ("qué incluye" in ql) or ("que incluye" in ql) or "include" in ql:
+        k_hits = keyword_hits(index_docs, ["incluye", "include", "included"], limit=2)
         seen = {id(d) for _, d in hits}
         k_hits = [(s, d) for s, d in k_hits if id(d) not in seen]
         hits = k_hits + hits
 
-    # Empuje PRECIOS (sin 2026 para no colar itinerarios/fechas)
-        if any(k in ql for k in ["precio", "precios", "coste", "price", "prices", "rate", "tarifa", "how much", "€"]):
+    # Empuje PRECIOS
+    if any(k in ql for k in ["precio", "precios", "coste", "price", "prices", "rate", "tarifa", "how much", "€"]):
         k_hits = keyword_hits(index_docs, ["precio", "precios", "tarifa", "price", "prices", "rate", "€"], limit=5)
         seen = {id(d) for _, d in hits}
         k_hits = [(s, d) for s, d in k_hits if id(d) not in seen]
@@ -208,41 +248,35 @@ def retrieve_context(query, brand=None, top_k=8, min_sim=0.50):
         k_hits.sort(key=lambda sd: ("precio" in sd[1]["title"].lower() or "price" in sd[1]["title"].lower()), reverse=True)
         hits = k_hits + hits
 
-   # Empuje 2026 (separado, favoreciendo precios si existen)
-   if "2026" in ql:
+    # Empuje 2026 (favorece si además son precios)
+    if "2026" in ql:
         k_hits = keyword_hits(index_docs, ["2026"], limit=5)
         seen = {id(d) for _, d in hits}
-       k_hits = [(s, d) for s, d in k_hits if id(d) not in seen]
-  # Si el título NO contiene "precio"/"price", quedan detrás
+        k_hits = [(s, d) for s, d in k_hits if id(d) not in seen]
         k_hits.sort(key=lambda sd: ("precio" in sd[1]["title"].lower() or "price" in sd[1]["title"].lower()), reverse=True)
-       hits = k_hits + hits
+        hits = k_hits + hits
 
-    # NUEVOS empujes bilingües (ES/EN)
-    # Jurisdicción / Applicable law
+    # Empujes bilingües legales
     hits = _push_keyword_hits(index_docs, hits, ql,
                               triggers=["jurisdicción", "juzgados", "competent court", "competent courts", "applicable law", "jurisdiction", "ley aplicable"],
                               targets=["jurisdicción", "juzgados", "aplicable", "applicable", "jurisdiction", "ley aplicable"],
                               limit=3)
 
-    # Términos de uso / Terms of use
     hits = _push_keyword_hits(index_docs, hits, ql,
                               triggers=["términos de uso", "terminos de uso", "terms of use", "legal notice", "terms"],
                               targets=["términos", "terminos", "terms", "legal notice"],
                               limit=2)
 
-    # Política de privacidad / Privacy policy
     hits = _push_keyword_hits(index_docs, hits, ql,
                               triggers=["política de privacidad", "politica de privacidad", "privacy policy", "data protection"],
                               targets=["política de privacidad", "privacy policy", "protección de datos", "data protection"],
                               limit=2)
 
-    # Condiciones de reserva / Booking conditions
     hits = _push_keyword_hits(index_docs, hits, ql,
                               triggers=["condiciones de reserva", "booking conditions", "booking terms", "reserva"],
                               targets=["condiciones de reserva", "booking conditions", "booking terms"],
                               limit=2)
 
-    # Contacto / Email
     hits = _push_keyword_hits(index_docs, hits, ql,
                               triggers=["contacto", "email", "contact", "correo"],
                               targets=["contacto", "email", "info@", "contact"],
@@ -271,12 +305,11 @@ def detect_lang(text: str) -> str:
     return 'en' if en_guess else 'es'
 
 def translate(text: str, target_lang: str) -> str:
-(text: str, target_lang: str) -> str:
     if not text:
         return ""
     try:
         r = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model=CHAT_MODEL,
             messages=[
                 {"role": "system", "content": f"Traduce al {target_lang} y devuelve solo el texto traducido."},
                 {"role": "user", "content": text}
@@ -300,7 +333,7 @@ FALLBACK_EMAIL_BY_BRAND = {
     None: "info@eltrenalandalus.com",
 }
 
-def rag_reply(user_text: str, brand: str = None, user_lang: str = None) -> str:
+def rag_reply(user_text: str, brand: str | None = None, user_lang: str | None = None) -> str:
     detected = detect_lang(user_text)
     user_lang = user_lang or detected
     query_for_kb = user_text if detected == 'es' else translate(user_text, 'es')
@@ -326,7 +359,7 @@ def rag_reply(user_text: str, brand: str = None, user_lang: str = None) -> str:
 
     try:
         resp = client.chat.completions.create(
-            model='gpt-4o-mini',
+            model=CHAT_MODEL,
             messages=messages,
             temperature=0.0,
             max_tokens=900
@@ -339,7 +372,7 @@ def rag_reply(user_text: str, brand: str = None, user_lang: str = None) -> str:
 # =========================
 # Utilidades Jivo
 # =========================
-def detect_brand_from_event(event: dict) -> str:
+def detect_brand_from_event(event: dict) -> str | None:
     blob = json.dumps(event, ensure_ascii=False).lower()
     if "eltrentranscantabrico.com" in blob: return "transcantabrico"
     if "eltrenalandalus.com"       in blob: return "alandalus"
@@ -354,15 +387,31 @@ def detect_brand_from_event(event: dict) -> str:
 def index():
     return "Bot activo (RAG + Jivo Bot API)"
 
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({"ok": True})
+
 @app.route("/kb", methods=["GET"])
 def kb_ls():
     brand = request.args.get("brand", "alandalus")
-    folder = brand_folder(brand)
-    try:
-        files = sorted(os.listdir(folder))
-        return jsonify({"brand": brand, "folder": folder, "files": files})
-    except Exception as e:
-        return jsonify({"brand": brand, "folder": folder, "error": str(e)}), 500
+    folders = []
+    # Siempre listar common
+    cf = common_folder()
+    if os.path.isdir(cf):
+        try:
+            files_c = sorted(os.listdir(cf))
+        except Exception as e:
+            files_c = [f"error: {e}"]
+        folders.append({"folder": cf, "files": files_c})
+    # Y la marca si existe
+    bf = brand_folder(brand)
+    if bf and os.path.isdir(bf):
+        try:
+            files_b = sorted(os.listdir(bf))
+        except Exception as e:
+            files_b = [f"error: {e}"]
+        folders.append({"folder": bf, "files": files_b})
+    return jsonify({"brand": brand, "folders": folders})
 
 @app.route("/reindex", methods=["POST"])
 def reindex():
@@ -377,18 +426,19 @@ def reindex():
     reindexed = []
 
     def do_brand(b):
-        INDEX_CACHE.pop(b or "general", None)
+        INDEX_CACHE.pop((b or "general"), None)
         docs = build_index_for(b)
         reindexed.append({"brand": b or "general", "chunks": len(docs)})
 
     if brand:
         do_brand(brand)
     else:
+        # reindex general y todas las subcarpetas (excluye archivos)
         do_brand(None)
         if os.path.isdir(KB_BASE):
             for name in os.listdir(KB_BASE):
                 sub = os.path.join(KB_BASE, name)
-                if os.path.isdir(sub):
+                if os.path.isdir(sub) and name != KB_COMMON:
                     do_brand(name)
 
     return jsonify({"status": "ok", "results": reindexed})
@@ -398,7 +448,8 @@ def debug_search():
     data = request.json or {}
     q = data.get("q", "")
     brand = data.get("brand")
-    hits = retrieve_context(q, brand=brand, top_k=8, min_sim=0.50)
+    lang = data.get("lang")
+    hits = retrieve_context(q, brand=brand, top_k=TOP_K, min_sim=MIN_SIM, lang_hint=lang)
     return jsonify([{"sim": round(s, 3), "title": d["title"], "preview": d["text"][:220]} for s, d in hits])
 
 @app.route("/webhook", methods=["POST"])
@@ -419,7 +470,7 @@ def webhook():
 
     user_lang = detect_lang(user_message)
     query_for_kb = user_message if user_lang == "es" else translate(user_message, "es")
-    hits = retrieve_context(query_for_kb, brand=brand, top_k=8, min_sim=0.50)
+    hits = retrieve_context(query_for_kb, brand=brand, top_k=TOP_K, min_sim=MIN_SIM, lang_hint=user_lang)
 
     reply = rag_reply(user_message, brand=brand, user_lang=user_lang)
     resp = {"reply": reply}
