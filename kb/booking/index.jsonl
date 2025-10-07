@@ -1,0 +1,12 @@
+{"topic": "reserva", "ref_id": "how-to-book-es", "language": "es", "doc": "faq/how-to-book-es.md"}
+{"topic": "booking", "ref_id": "how-to-book-en", "language": "en", "doc": "faq/how-to-book-en.md"}
+{"topic": "pagos", "ref_id": "payments-general", "language": "es", "doc": "../common/legal/payments-es.md"}
+{"topic": "payments", "ref_id": "payments-general", "language": "en", "doc": "../common/legal/payments-en.md"}
+{"topic": "cancelaciones", "ref_id": "cancellations-general", "language": "es", "doc": "../common/legal/cancellations-es.md"}
+{"topic": "cancellations", "ref_id": "cancellations-general", "language": "en", "doc": "../common/legal/cancellations-en.md"}
+{"topic": "cambios", "ref_id": "changes-general", "language": "es", "doc": "../common/legal/changes-es.md"}
+{"topic": "changes", "ref_id": "changes-general", "language": "en", "doc": "../common/legal/changes-en.md"}
+{"topic": "seguro anulacion", "ref_id": "insurance-optional-general", "language": "es", "doc": "../common/legal/insurance-optional-es.md"}
+{"topic": "optional cancellation insurance", "ref_id": "insurance-optional-general", "language": "en", "doc": "../common/legal/insurance-optional-en.md"}
+{"topic": "transfers", "ref_id": "transfers-conditions-general", "language": "en", "doc": "../common/legal/transfers-en.md"}
+{"topic": "traslados", "ref_id": "transfers-conditions-general", "language": "es", "doc": "../common/legal/transfers-es.md"}

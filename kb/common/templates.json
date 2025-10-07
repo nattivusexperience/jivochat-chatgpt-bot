@@ -1,0 +1,10 @@
+{
+  "greeting_es": "¡Hola! 😊 Soy el asistente virtual. ¿En qué puedo ayudarte?",
+  "greeting_en": "Hi there! 😊 I’m the virtual assistant. How can I help you today?",
+  "handoff_es": "Te pongo en contacto con un agente humano. Por favor, mantente atento/a.",
+  "handoff_en": "I’ll connect you with a human agent. Please stay tuned.",
+  "fallback_es": "No he encontrado esa información en este momento. ¿Puedes darme un poco más de detalle?",
+  "fallback_en": "I couldn’t find that information right now. Could you share a bit more detail?",
+  "legal_prompt_es": "Recuerda: responde basándote en las políticas de /kb/common/legal cuando la pregunta sea legal.",
+  "legal_prompt_en": "Remember: when the question is legal, rely on /kb/common/legal policies."
+}

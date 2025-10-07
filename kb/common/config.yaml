@@ -1,0 +1,16 @@
+# Config común del bot
+default_language: auto            # detecta automáticamente el idioma del cliente
+fallback_language: es
+tone: friendly-professional       # cálido, claro, con rigor
+max_context_turns: 16
+retrieval:
+  top_k: 6                        # nº de fragmentos a recuperar por consulta
+  min_score: 0.35                 # umbral de similitud recomendado
+  section_priority:
+    - legal
+    - product
+    - operations
+safety:
+  pii_redaction: false            # redacción automática de PII en logs (activar según despliegue)
+metadata:
+  last_updated: 2025-10-06

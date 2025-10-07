@@ -1,0 +1,37 @@
+{
+  "cancelaciones": [
+    "anulación",
+    "devoluciones",
+    "reembolso",
+    "refunds"
+  ],
+  "pagos": [
+    "formas de pago",
+    "payment methods",
+    "tarjeta",
+    "transferencia",
+    "paypal",
+    "amex",
+    "visa",
+    "mastercard"
+  ],
+  "reserva": [
+    "booking",
+    "reservar",
+    "cómo reservar",
+    "how to book"
+  ],
+  "cambios": [
+    "modificaciones",
+    "changes"
+  ],
+  "seguro": [
+    "seguro de viaje",
+    "seguro de anulación",
+    "insurance"
+  ],
+  "traslados": [
+    "transfers",
+    "transfer"
+  ]
+}
